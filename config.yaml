@@ -1,0 +1,32 @@
+# VIS-MCP config (v0). Keys come from environment only (${ENV_VAR}); fails closed if missing.
+api_keys:
+  openrouter: ${OPENROUTER_API_KEY}
+  xai: ${XAI_API_KEY}
+  anthropic: ${ANTHROPIC_API_KEY}   # optional; only needed if a model uses provider: anthropic
+
+# Model slugs are EXTERNAL catalog facts — confirm each against the live OpenRouter / xAI catalog.
+models:
+  - id: opus
+    name: Claude Opus
+    provider: openrouter
+    model_id: anthropic/claude-opus-4      # CONFIRM
+    temperature: 0.3
+  - id: o1
+    name: OpenAI o1
+    provider: openrouter
+    model_id: openai/o1                     # CONFIRM
+    temperature: 1.0
+  - id: r1
+    name: DeepSeek R1
+    provider: openrouter
+    model_id: deepseek/deepseek-r1          # CONFIRM
+    temperature: 0.6
+  - id: grok
+    name: Grok
+    provider: xai
+    model_id: grok-3                         # CONFIRM
+    temperature: 0.4
+
+defaults:
+  timeout: 120
+  max_tokens: 4096
