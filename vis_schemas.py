@@ -445,12 +445,12 @@ class GateResult(Strict):
     mode: Mode
     reversibility: Reversibility
     bar: int
-    raw_confidence: Optional[int] = None
-    confidence: int
-    caps_applied: List[str] = Field(default_factory=list)
+    confidence: int                           # the estimate itself, never bent by code (range 70–100 to decide)
+    headroom: int                             # confidence − bar; more is better
     label: Level
     label_reason: str
-    failures: List[str] = Field(default_factory=list)
+    failures: List[str] = Field(default_factory=list)    # each one takes GO away
+    warnings: List[str] = Field(default_factory=list)    # shown in the brief; GO stays
     tripped: List[str] = Field(default_factory=list)
     human_hand: Optional[HumanHand] = None
     allowed: List[Recommendation]
@@ -512,10 +512,12 @@ class DecisionBrief(Strict):
     least_disproved: Optional[str] = None     # (5) — Standard VIS
     least_disproved_reason: str = ""
     confidence: int                           # (6)
+    bar: int
     confidence_label: Level
     confidence_reason: str
     critical_assumptions: List[Assumption]    # (7)
     main_risks: List[str]                     # (8)
+    warnings: List[str] = Field(default_factory=list)
     recommendation: Recommendation            # (9)
     recommendation_reason: str
     next_action: NextAction                   # (10)

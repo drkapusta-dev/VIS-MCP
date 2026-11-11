@@ -155,8 +155,8 @@ def test_standard_reversible_case_goes():
     diag, gate = core.run_gate(case())
     assert gate.failures == []
     assert diag.leader == "H2"
-    assert gate.raw_confidence == 72            # min(staff 78, red median_low(72, 75))
-    assert gate.confidence == 72 and gate.bar == 70
+    assert gate.confidence == 72 and gate.bar == 70   # min(staff 78, red median_low(72, 75))
+    assert gate.headroom == 2 and gate.warnings == []
     assert gate.allowed == ["GO", "LEARN", "STOP"] and gate.recommendation == "GO"
     assert gate.label == "M"
 
@@ -165,7 +165,7 @@ def test_four_diagnostics():
     diag, _ = core.run_gate(case())
     assert diag.most_diagnostic == ["E1", "E3", "E2"]
     assert diag.most_contradicted == "H4"
-    assert (diag.leader, diag.runner_up, diag.margin) == ("H2", "H3", 10)
+    assert (diag.leader, diag.runner_up, diag.margin) == ("H2", "H3", 3)    # weights H 3 / M 2 / L 1
     # without E1, H3 (no assumptions) ties H2 at zero and leads by Occam
     assert (diag.flip_item, diag.flip_reason) == ("E1", "removal")
     assert diag.disagreements == []
@@ -198,14 +198,19 @@ def test_unresolved_tie_blocks_go():
     assert "GO" not in gate.allowed
 
 
-def test_disagreement_becomes_unknown_and_the_flip_item_caps():
+def test_disagreement_becomes_unknown_and_the_flip_item_is_watched_or_blocks():
     dissent = with_cell(TRUE, "E1", "H2", "I")
     diag, gate = core.run_gate(case(red_cells=(TRUE, dissent)))
     assert diag.consensus["E1"]["H2"] == "?"
     assert [(d.evidence, d.hypothesis) for d in diag.disagreements] == [("E1", "H2")]
     assert (diag.flip_item, diag.flip_reason) == ("E1", "unknown_on_leader")
-    assert gate.confidence == 69 and gate.recommendation == "LEARN"
-    assert gate.next_observation == "E1"
+    # reversible: the number stays the estimate, GO stays, the flip item is the first thing to observe
+    assert gate.confidence == 72 and gate.recommendation == "GO"
+    assert gate.next_observation == "E1" and any("observe it first" in w for w in gate.warnings)
+    # irreversible: the same weak spot takes GO away
+    _, high = core.run_gate(case("irreversible", red_cells=(TRUE, dissent), hand=HumanHand(name=OWNER, at=T0),
+                                 est=estimates(90, ((90, "anthropic"), (90, "openai")))))
+    assert "GO" not in high.allowed and any("before an irreversible commitment" in f for f in high.failures)
 
 
 # ----------------------------------------------------------------------------- the reversibility bar
@@ -249,13 +254,26 @@ def test_tripped_kill_indicator_takes_away_go():
     assert learn.recommendation == "LEARN" and "GO" not in learn.allowed
 
 
-def test_caps():
+def test_range_70_to_100_more_is_better():
+    assert core.FLOOR == 70 and min(core.BAR.values()) == core.FLOOR
+    _, at_floor = core.run_gate(case(est=estimates(70, ((70, "anthropic"), (70, "openai")))))
+    _, higher = core.run_gate(case(est=estimates(95, ((93, "anthropic"), (96, "openai")))))
+    assert (at_floor.headroom, higher.headroom) == (0, 23)
+    assert at_floor.recommendation == higher.recommendation == "GO"
+
+
+def test_weak_spots_warn_on_reversible_and_block_irreversible():
+    hand = HumanHand(name=OWNER, at=T0)
+    high = estimates(90, ((90, "anthropic"), (90, "openai")))
     _, few = core.run_gate(case(ev=evidence(groups=["a", "a", "b", "b", "b"])))
-    assert few.confidence == 69 and few.recommendation == "LEARN"
-    _, low = core.run_gate(case(asm=assumptions(critical_confidence="L"),
-                                est=estimates(90, ((90, "anthropic"), (90, "openai")))))
-    assert low.confidence == 79 and low.recommendation == "GO"
-    assert any("low confidence" in c for c in low.caps_applied)
+    assert few.confidence == 72 and few.recommendation == "GO"
+    assert any("fewer than 3" in w for w in few.warnings)
+    _, low = core.run_gate(case(asm=assumptions(critical_confidence="L")))
+    assert low.confidence == 72 and low.recommendation == "GO"
+    assert any("low confidence" in w for w in low.warnings)
+    _, low_high = core.run_gate(case("irreversible", asm=assumptions(critical_confidence="L"), est=high, hand=hand))
+    assert "GO" not in low_high.allowed and low_high.confidence == 90
+    assert any("low confidence" in f for f in low_high.failures)
 
 
 # ----------------------------------------------------------------------------- red team and estimates
@@ -363,7 +381,8 @@ def test_brief_numbers_come_from_code():
     assert (brief.least_disproved, brief.confidence, brief.recommendation) == ("H2", 72, "GO")
     assert brief.assessment.startswith("Based on the available evidence, VIS assesses H2")
     assert [h.status for h in brief.hypotheses if h.id == "H2"] == ["leader"]
-    assert "11. **OODA trigger:**" in core.render_brief(brief)
+    page = core.render_brief(brief)
+    assert "11. **OODA trigger:**" in page and "72 % (+2 against the 70 % bar" in page
     with pytest.raises(ValidationError):
         BriefProse(main_risks=["r"], recommendation_reason="The AI decided to go.",
                    next_action=prose().next_action, ooda_trigger="t")
