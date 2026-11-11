@@ -8,7 +8,9 @@ finality layer.
 - `schema_id` — fixed external-artifact-reference identifier (provided by the backend's contract).
 - `schema_version` — required, non-empty.
 - `source_system` — required; for this repo: `"vis"`.
-- at least one of `receipt_id` / `receipt_hash` — use the brief hash as `receipt_hash`.
+- at least one of `receipt_id` / `receipt_hash` — v1 sends the `DecisionReceipt`'s own `receipt_hash`
+  (sha256 over the whole receipt, which carries the brief hash and the hash of every stage object);
+  `vis_core.to_reference()` builds the object and refuses a receipt whose hash does not verify.
 - `metadata` — a dict (carry the full `DecisionReceipt` here) when present.
 - any field ending in `_ref` must **not** be an absolute local path.
 

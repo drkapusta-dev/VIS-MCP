@@ -6,13 +6,35 @@ Status: **experimental · synthetic · not production.** This repo is intentiona
 production codebase.
 
 ## What it is
-An enforced decision pipeline exposed as MCP tools:
+The VIS decision method (Vanguard Intelligence System) as an enforced pipeline. Models draft and score;
+**pure code** decides every form and every number:
 
-`Frame → Hypotheses → ACH (blinded) → Red Team → Synthesis (GO / LEARN / STOP)`
+`Load lessons → Frame → Occam → Evidence → ACH (blinded) → Assumptions & kill indicators → Red Team →
+Gate (GO / LEARN / STOP) → Decision Brief + DecisionReceipt → After action → Lessons pack`
 
-Each stage emits a typed object. Hypotheses are **blinded** (deterministic, seeded, recorded permutation)
-before the Analysis-of-Competing-Hypotheses stage to reduce anchoring bias, then re-attached to true labels
-**in pure code** (never by a model). The final brief becomes a `DecisionReceipt`.
+- **Occam generates, ACH eliminates.** Hypotheses are ordered simplest-first (fewest explicit assumptions)
+  in code; they die by inconsistent evidence. The least-disproved hypothesis leads, never the most
+  supported one; a tie goes to the simpler hypothesis.
+- **Blinding** is a deterministic, seeded, recorded permutation of hypothesis labels; scorers never see
+  which option is preferred. Re-attachment to true labels is pure code.
+- **The reversibility gate:** reversible decisions → GO allowed at ≥ 70 %; irreversible or severe →
+  ≥ 80 % **and** the decision owner's recorded hand. A failed gate or a tripped kill indicator takes GO
+  out of the allowed set.
+- **After action:** every brief carries its review date; accepted lessons form a versioned pack that the
+  next decision loads. Lessons add checks and warnings; they never move a threshold.
+
+## What exists today
+| Part | State |
+|---|---|
+| `ask-all`, `list-models` (MCP tools) | live — one question to N models concurrently |
+| `vis_schemas.py` — typed objects of every stage | built, tested |
+| `vis_core.py` — Occam order, blinding, ACH scoring and its four diagnostics, gates, reversibility bar, brief, receipt hash, lessons pack | built, tested, no model calls |
+| MCP tools for the pipeline stages (case file, Quick / Standard / Red Team modes) | **not yet** |
+| A staff-voice provider | **not yet** |
+| Emitting the receipt to an evidence backend | dormant seam (`emit_to_sink` is a no-op) |
+
+`ask-all synthesize=true` lets one model merge the answers. That is a convenience for reading red-team
+answers side by side — never the synthesis stage, which is code.
 
 ## Architecture boundary (binding)
 VIS produces **decision-support evidence** only. It:
@@ -21,6 +43,8 @@ VIS produces **decision-support evidence** only. It:
 - **never** calls a settlement / finality layer;
 - treats a reference as **not** a verification (a reference is carried, not attested).
 
+VIS assesses; the decision owner decides. Nothing VIS writes says "AI decided".
+
 ## Claim discipline
 VIS output is **decision-support ("readiness") evidence, not legal / audit / qualified certification.**
 No certification, compliance, or finality claims in code, docs, tests, or commit messages.
@@ -28,12 +52,19 @@ No certification, compliance, or finality claims in code, docs, tests, or commit
 ## Layout
 ```
 VIS-MCP/
-├── server.py            # MCP server (deliberation pipeline + evidence-seam emit)
-├── vis_schemas.py       # Pydantic single source of truth (stages + DecisionReceipt + Blinding + canonical_json)
-├── config.yaml          # env-only keys; per-model structured-output mode; fail-closed
-├── personas/            # stage personas (framer, hypothesis-generator, ach-analyst, red-team, synthesis-engine)
-├── docs/EVIDENCE_SEAM.md# the reference-dict contract VIS emits (data boundary, not a code import)
+├── server.py             # MCP server (ask-all, list-models; evidence-seam emit, dormant)
+├── vis_schemas.py        # Pydantic single source of truth (every stage + DecisionReceipt + canonical_json)
+├── vis_core.py           # the pure-code pipeline core: ordering, blinding, scoring, gates, receipt, lessons
+├── config.yaml           # env-only keys; model list; fail-closed
+├── personas/             # stage personas (to come with the pipeline tools)
+├── docs/EVIDENCE_SEAM.md # the reference-dict contract VIS emits (data boundary, not a code import)
+├── tests/                # no network
 └── pyproject.toml
+```
+
+## Tests
+```
+uv run --no-project --with pytest --with "pydantic>=2.6" --with pyyaml python -m pytest -q
 ```
 
 ## Secrets

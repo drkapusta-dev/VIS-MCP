@@ -170,7 +170,8 @@ async def list_tools() -> List[Tool]:
                     "only": {"type": "array", "items": {"type": "string"},
                              "description": "Optional model ids to limit to (e.g. ['opus','grok'])."},
                     "synthesize": {"type": "boolean", "default": False,
-                                   "description": "Also return one merged summary."},
+                                   "description": "Also return one model-merged summary — a reading aid, "
+                                                  "never the VIS synthesis stage (that is code)."},
                 },
                 "required": ["question"],
             },
