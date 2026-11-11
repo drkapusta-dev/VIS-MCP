@@ -364,18 +364,46 @@ def _short(exc: Exception, limit: int = 400) -> str:
     return text if len(text) <= limit else text[:limit] + " …"
 
 
+RETRY_PAUSE_S = 3.0
+_RETRY_STATUS = {408, 429, 500, 502, 503, 504}
+
+
+def _http_status(exc: Exception) -> Optional[int]:
+    return getattr(getattr(exc, "response", None), "status_code", None)
+
+
+def _parse_draft(stage: str, model: ModelConfig, answer: Optional[str]):
+    if not answer or not answer.strip():
+        raise ValueError("empty answer — the model may have spent its whole token budget on reasoning")
+    data = extract_json(answer)
+    if stage in ("hypotheses", "hypotheses_add"):
+        data = _items(data)
+        data = {"items": [{**item, "proposed_by": model.id} for item in data["items"]]}
+    return _DRAFT_TARGET[stage].model_validate(data)
+
+
 async def _draft_one(model: ModelConfig, stage: str, system: str, user: str, ask: Ask) -> Tuple[Optional[dict], str, str]:
-    try:
-        answer = await ask(model, system, user)
-        data = extract_json(answer)
-        if stage in ("hypotheses", "hypotheses_add"):
-            data = _items(data)
-            data = {"items": [{**item, "proposed_by": model.id} for item in data["items"]]}
-        draft = _DRAFT_TARGET[stage].model_validate(data)
-        note = draft.reason if isinstance(draft, EstimateDraft) else ""
-        return draft.model_dump(mode="json"), note, ""
-    except Exception as exc:                       # one model failing must not sink the rest
-        return None, "", _short(exc)
+    """Two attempts at most. A rate limit or server error is retried once after a pause; an answer
+    that does not parse or validate is retried once with the error shown to the model."""
+    prompt, error = user, ""
+    for attempt in (1, 2):
+        try:
+            answer = await ask(model, system, prompt)
+        except Exception as exc:                   # one model failing must not sink the rest
+            error = _short(exc)
+            if attempt == 1 and _http_status(exc) in _RETRY_STATUS:
+                await asyncio.sleep(RETRY_PAUSE_S)
+                continue
+            return None, "", error
+        try:
+            draft = _parse_draft(stage, model, answer)
+            note = draft.reason if isinstance(draft, EstimateDraft) else ""
+            return draft.model_dump(mode="json"), note, ""
+        except Exception as exc:
+            error = _short(exc)
+            prompt = (f"{user}\n\nYour previous answer did not validate:\n{error}\n\n"
+                      "Answer again with the corrected JSON only.")
+    return None, "", error
 
 
 async def draft_stage(store: CaseStore, case_id: str, stage: str, models: Sequence[ModelConfig],

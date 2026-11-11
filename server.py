@@ -93,7 +93,7 @@ class AdvisoryClient:
                 payload["temperature"] = m.temperature
             resp = await self.http.post(url, headers=headers, json=payload)
             resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
+            return resp.json()["choices"][0]["message"].get("content") or ""
         if m.provider == "anthropic":
             headers = {
                 "x-api-key": _key("anthropic"),
@@ -264,6 +264,12 @@ VIS_TOOLS = [
 ]
 
 STORE = vis_case.CaseStore()
+# Drafts are long structured answers and some models reason first: give them room.
+DRAFT_MAX_TOKENS = int(DEFAULTS.get("draft_max_tokens", 16000))
+
+
+async def _draft_ask(m: ModelConfig, system: str, user: str) -> str:
+    return await client.ask(m.model_copy(update={"max_tokens": max(m.max_tokens, DRAFT_MAX_TOKENS)}), system, user)
 
 
 def _model(model_id: str) -> ModelConfig:
@@ -297,7 +303,7 @@ async def vis_call(name: str, args: Dict[str, Any]) -> str:
             ids = args.get("draft_with") or (DEFAULTS.get("red_team") if role == "red_team" else
                                              [DEFAULTS.get("staff_model")])
             models = [_model(i) for i in ids if i]
-            lines = await vis_case.draft_stage(STORE, case_id, stage, models, role, client.ask)
+            lines = await vis_case.draft_stage(STORE, case_id, stage, models, role, _draft_ask)
             return "\n".join(lines) + "\n\n" + vis_case.summary(STORE.load(case_id))
         if "payload" not in args:
             raise ValueError("hand in a payload, or set draft_with")
