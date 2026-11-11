@@ -421,7 +421,7 @@ class RedTeamReport(Strict):
     family: str = Field(min_length=1)
     premortem: str = Field(min_length=1)
     strongest_argument: str = Field(min_length=1)
-    failure_scenarios: List[FailureScenario] = Field(min_length=2, max_length=3)
+    failure_scenarios: List[FailureScenario] = Field(min_length=2)     # §9: at least 2; more is welcome
     mitigations: List[str] = Field(min_length=1)
     biases: List[BiasFlag] = Field(default_factory=list)
 
