@@ -32,6 +32,7 @@ class ModelConfig(BaseModel):
     name: str                     # human name
     provider: Provider
     model_id: str                 # provider catalog slug (CONFIRM against live catalog)
+    family: Optional[str] = None  # model family; one family = one red-team voice (derived from the slug if unset)
     temperature: Optional[float] = 0.3
     max_tokens: int = 4096
     timeout: int = 120
@@ -616,3 +617,27 @@ class CaseFile(Strict):
     red_team: List[RedTeamReport] = Field(default_factory=list)
     estimates: List[ProbabilityEstimate] = Field(default_factory=list)
     human_hand: Optional[HumanHand] = None
+
+
+# =============================================================================
+# The stored case — one decision, one file, in a private local folder
+# =============================================================================
+class LogEntry(Strict):
+    at: datetime
+    stage: str
+    by: str                                    # who answered: a model id, a person, or "code"
+    role: Literal["staff", "red_team", "human", "code"]
+    family: str
+    model: Optional[str] = None                # provider slug when a model answered
+    note: str = ""
+
+
+class CaseRecord(Strict):
+    case: CaseFile
+    log: List[LogEntry] = Field(default_factory=list)
+    diagnostics: Optional[Diagnostics] = None
+    gate: Optional[GateResult] = None
+    decision: Optional[Decision] = None
+    prose: Optional[BriefProse] = None
+    brief: Optional[DecisionBrief] = None
+    receipt: Optional[DecisionReceipt] = None

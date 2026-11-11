@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Experimental MCP server for structured, bias-resistant decision deliberation"
 requires-python = ">=3.11"
 dependencies = [
-    "mcp>=1.0.0",
+    "mcp>=1.27,<2",          # 2.x changes the low-level Server API this server uses
     "pydantic>=2.6",
     "httpx>=0.27",
     "instructor>=1.0",
