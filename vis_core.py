@@ -7,7 +7,8 @@ decides every form and every number:
 - the blinding of hypothesis labels before scoring, and the unblinding after,
 - the ACH aggregation and its four diagnostics (ACH eliminates: the
   least-disproved hypothesis leads, never the most supported one),
-- the gates of each stage, the confidence cap and the reversibility bar,
+- the gates of each stage and the reversibility bar (decisions are taken in the
+  70–100 % confidence range: 70 is the minimum, more is better),
 - which of GO / LEARN / STOP the evidence allows,
 - the Decision Brief's computed fields, the receipt hash, the lessons pack.
 
@@ -51,9 +52,14 @@ from vis_schemas import (
     content_hash,
 )
 
+# --- The owner's ruling (11 Nov 2026): decisions are taken in the 70–100 % confidence range;
+#     70 is the minimum, more is better. The confidence number is the estimate itself — code
+#     never bends it; a weak spot either blocks GO or is shown as a warning.
+FLOOR = 70
 # --- Ratified (VIS constitution v0, amendment 1, 2026-08-20). Changed only by the owner. ---
-BAR: Dict[str, int] = {"reversible": 70, "irreversible": 80, "severe": 80}
+BAR: Dict[str, int] = {"reversible": FLOOR, "irreversible": 80, "severe": 80}
 HUMAN_HAND_REQUIRED = frozenset({"irreversible", "severe"})
+assert all(bar >= FLOOR for bar in BAR.values())
 
 # --- From the method's text (§4, §7, paper §8.3). ---
 HYPOTHESES_MIN, HYPOTHESES_MAX = 3, 6
@@ -62,11 +68,8 @@ CRITICAL_MIN, CRITICAL_MAX = 1, 2
 MIN_INDEPENDENT_CHANNELS = 3
 RED_TEAM_MIN_FAMILIES = 2
 
-# --- Proposed defaults (record 2026-11-11 §2.6). The owner's to set. ---
-RELIABILITY_WEIGHT: Dict[str, int] = {"H": 10, "M": 6, "L": 3}
-CAP_FEW_CHANNELS = 69
-CAP_CRITICAL_LOW_CONFIDENCE = 79
-CAP_FLIP_ITEM_UNKNOWN = 69
+# --- Set 11 Nov 2026: one high-reliability item weighs as much as three low ones. ---
+RELIABILITY_WEIGHT: Dict[str, int] = {"H": 3, "M": 2, "L": 1}
 
 STAGE_ORDER: List[str] = list(get_args(Stage))
 _LABEL_WORD = {"H": "HIGH", "M": "MEDIUM", "L": "LOW"}
@@ -317,12 +320,14 @@ def check_scorers(matrices: Sequence[ScorerMatrix], staff_family: str) -> List[s
 def check_evidence(
     evidence: Sequence[Evidence], hypotheses: Sequence[Hypothesis], reversibility: str,
     leader: Optional[str],
-) -> Tuple[List[str], List[Tuple[int, str]]]:
+) -> Tuple[List[str], List[str]]:
+    """Returns (failures, warnings). The ≥ 3-channel standard binds high stakes (paper §8.3);
+    on a reversible decision a thinner register is shown, not blocked (§12: do not wait)."""
     failures: List[str] = []
-    caps: List[Tuple[int, str]] = []
+    warnings: List[str] = []
     if not evidence:
         failures.append("evidence: the register is empty")
-        return failures, caps
+        return failures, warnings
     ids = [e.id for e in evidence]
     if len(set(ids)) != len(ids):
         failures.append("evidence: ids are not unique")
@@ -339,10 +344,10 @@ def check_evidence(
                 f"needs ≥ {MIN_INDEPENDENT_CHANNELS}"
             )
         else:
-            caps.append((CAP_FEW_CHANNELS, f"fewer than {MIN_INDEPENDENT_CHANNELS} independent channels ({len(groups)})"))
+            warnings.append(f"evidence: {len(groups)} independent channel(s), fewer than {MIN_INDEPENDENT_CHANNELS}")
     if high_stakes and leader and not any(e.designed_to_disconfirm == leader for e in evidence):
         failures.append(f"evidence: no channel was designed to disconfirm the leader {leader}")
-    return failures, caps
+    return failures, warnings
 
 
 def check_assumptions(assumptions: Sequence[Assumption], mode: Mode) -> List[str]:
@@ -444,8 +449,9 @@ def run_gate(case: CaseFile) -> Tuple[Optional[Diagnostics], GateResult]:
     confidence under the bar removes GO from the allowed set."""
     charter = case.charter
     mode, reversibility = charter.mode, charter.reversibility
+    high_stakes = reversibility in HUMAN_HAND_REQUIRED
     failures: List[str] = list(check_hypotheses(case.hypotheses, mode))
-    caps: List[Tuple[int, str]] = []
+    warnings: List[str] = []
     diagnostics: Optional[Diagnostics] = None
 
     if mode == "standard":
@@ -464,28 +470,34 @@ def run_gate(case: CaseFile) -> Tuple[Optional[Diagnostics], GateResult]:
             failures.append("ach: no matrix could be scored")
         elif diagnostics.tie_broken_by == "unresolved":
             failures.append("ach: the leader is tied with an equally simple hypothesis; gather the item that separates them")
-        evidence_failures, evidence_caps = check_evidence(
+        evidence_failures, evidence_warnings = check_evidence(
             case.evidence, case.hypotheses, reversibility, diagnostics.leader if diagnostics else None
         )
         failures += evidence_failures
-        caps += evidence_caps
+        warnings += evidence_warnings
         known_ids = {e.id for e in case.evidence} | {a.id for a in case.assumptions}
         failures += check_red_team(case.red_team, case.staff_family, known_ids)
         if diagnostics and diagnostics.flip_reason == "unknown_on_leader":
-            caps.append((CAP_FLIP_ITEM_UNKNOWN, f"the flip item {diagnostics.flip_item} is still '?' on the leader"))
+            spot = f"the flip item {diagnostics.flip_item} is still '?' on the leader"
+            if high_stakes:
+                failures.append(f"evidence: {spot} — resolve it before an irreversible commitment")
+            else:
+                warnings.append(f"evidence: {spot} — observe it first after GO")
 
     failures += check_assumptions(case.assumptions, mode)
     if any(a.critical and a.confidence == "L" for a in case.assumptions):
-        caps.append((CAP_CRITICAL_LOW_CONFIDENCE, "a critical assumption is held at low confidence"))
+        spot = "a critical assumption is held at low confidence"
+        if high_stakes:
+            failures.append(f"assumptions: {spot} — raise it before an irreversible commitment")
+        else:
+            warnings.append(f"assumptions: {spot} — its kill indicator is the first thing to watch")
 
-    raw, confidence_failures = combine_confidence(case.estimates, mode, case.staff_family)
+    estimate, confidence_failures = combine_confidence(case.estimates, mode, case.staff_family)
     failures += confidence_failures
-    confidence = raw if raw is not None else 0
-    for cap, _ in caps:
-        confidence = min(confidence, cap)
+    confidence = estimate if estimate is not None else 0
 
     hand = case.human_hand
-    if reversibility in HUMAN_HAND_REQUIRED:
+    if high_stakes:
         if hand is None:
             failures.append("gate: an irreversible or severe decision needs the decision owner's human hand")
         elif hand.name != charter.roles.decision_owner:
@@ -499,7 +511,8 @@ def run_gate(case: CaseFile) -> Tuple[Optional[Diagnostics], GateResult]:
     allowed: List[Recommendation] = ["GO", "LEARN", "STOP"] if go_allowed else ["LEARN", "STOP"]
     if go_allowed:
         recommendation: Recommendation = "GO"
-        reason = f"confidence {confidence} % ≥ the {reversibility} bar of {bar} %, and every gate passed"
+        reason = (f"confidence {confidence} %, {confidence - bar} above the {reversibility} bar of {bar} % "
+                  f"(range {FLOOR}–100, more is better), and every gate passed")
     else:
         parts = []
         if failures:
@@ -513,9 +526,9 @@ def run_gate(case: CaseFile) -> Tuple[Optional[Diagnostics], GateResult]:
         recommendation = "STOP" if stop else "LEARN"
 
     return diagnostics, GateResult(
-        mode=mode, reversibility=reversibility, bar=bar, raw_confidence=raw, confidence=confidence,
-        caps_applied=[f"≤ {cap} %: {why}" for cap, why in caps], label=label, label_reason=label_reason,
-        failures=failures, tripped=[a.id for a in tripped], human_hand=hand, allowed=allowed,
+        mode=mode, reversibility=reversibility, bar=bar, confidence=confidence,
+        headroom=confidence - bar, label=label, label_reason=label_reason,
+        failures=failures, warnings=warnings, tripped=[a.id for a in tripped], human_hand=hand, allowed=allowed,
         recommendation=recommendation, reason=reason,
         next_observation=(diagnostics.flip_item if diagnostics and diagnostics.flip_item
                           else fastest_kill_test(case.hypotheses)),
@@ -552,14 +565,14 @@ def assemble_brief(case: CaseFile, diagnostics: Optional[Diagnostics], gate: Gat
         assessment = (
             f"Based on the available evidence, VIS assesses {diagnostics.leader} "
             f"({titles[diagnostics.leader]}) as the least-disproved hypothesis, at {gate.confidence} % "
-            f"against a bar of {gate.bar} % (confidence {_LABEL_WORD[gate.label]}); "
+            f"({gate.headroom:+d} against the {gate.bar} % bar; confidence {_LABEL_WORD[gate.label]}); "
             f"recommendation: {gate.recommendation}."
         )
     else:
         statuses = [HypothesisStatus(id=h.id, title=h.title, status="open") for h in occam_order(case.hypotheses)]
         assessment = (
             f"Based on the available evidence, VIS assesses {gate.recommendation} at {gate.confidence} % "
-            f"against a bar of {gate.bar} %."
+            f"({gate.headroom:+d} against the {gate.bar} % bar)."
         )
     if charter.mode == "standard" and not prose.least_disproved_reason.strip():
         raise ValueError("a Standard VIS brief says why the leader is the least disproved (§19.5)")
@@ -568,10 +581,10 @@ def assemble_brief(case: CaseFile, diagnostics: Optional[Diagnostics], gate: Gat
         question=charter.question.text(),
         key_facts=[s for s in charter.statements if s.label == "fact"],
         hypotheses=statuses, least_disproved=diagnostics.leader if diagnostics else None,
-        least_disproved_reason=prose.least_disproved_reason, confidence=gate.confidence,
+        least_disproved_reason=prose.least_disproved_reason, confidence=gate.confidence, bar=gate.bar,
         confidence_label=gate.label, confidence_reason=gate.label_reason,
         critical_assumptions=[a for a in case.assumptions if a.critical],
-        main_risks=prose.main_risks, recommendation=gate.recommendation,
+        main_risks=prose.main_risks, warnings=list(gate.warnings), recommendation=gate.recommendation,
         recommendation_reason=prose.recommendation_reason, next_action=prose.next_action,
         ooda_trigger=prose.ooda_trigger, aar_date=aar_date, assessment=assessment,
     )
@@ -590,11 +603,13 @@ def render_brief(brief: DecisionBrief) -> str:
             for h in brief.hypotheses),
         f"5. **Least disproved:** {brief.least_disproved or '— (Quick VIS)'}"
         + (f" — {brief.least_disproved_reason}" if brief.least_disproved_reason else ""),
-        f"6. **Confidence:** {brief.confidence} % · {_LABEL_WORD[brief.confidence_label]} — {brief.confidence_reason}",
+        f"6. **Confidence:** {brief.confidence} % ({brief.confidence - brief.bar:+d} against the {brief.bar} % bar; "
+        f"range {FLOOR}–100, more is better) · {_LABEL_WORD[brief.confidence_label]} — {brief.confidence_reason}",
         "7. **Critical assumptions:** " + ("; ".join(
             f"{a.id} {a.text} — kill: {a.kill_indicator.observable} {a.kill_indicator.threshold} → {a.kill_indicator.action}"
             for a in brief.critical_assumptions if a.kill_indicator) or "—"),
-        "8. **Main risks:** " + "; ".join(brief.main_risks),
+        "8. **Main risks:** " + "; ".join(brief.main_risks)
+        + ("" if not brief.warnings else " · **Warnings:** " + "; ".join(brief.warnings)),
         f"9. **Recommendation:** {brief.recommendation} — {brief.recommendation_reason}",
         f"10. **Next action:** {brief.next_action.action} · owner {brief.next_action.owner} · by "
         f"{brief.next_action.deadline.isoformat()} · success: {brief.next_action.success_metric} · "

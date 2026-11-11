@@ -17,9 +17,15 @@ Gate (GO / LEARN / STOP) → Decision Brief + DecisionReceipt → After action �
   supported one; a tie goes to the simpler hypothesis.
 - **Blinding** is a deterministic, seeded, recorded permutation of hypothesis labels; scorers never see
   which option is preferred. Re-attachment to true labels is pure code.
+- **Decisions are taken in the 70–100 % confidence range: 70 is the minimum, more is better.** The
+  confidence number is the estimate itself; code never bends it. The brief shows how far above the bar
+  a decision stands.
 - **The reversibility gate:** reversible decisions → GO allowed at ≥ 70 %; irreversible or severe →
   ≥ 80 % **and** the decision owner's recorded hand. A failed gate or a tripped kill indicator takes GO
-  out of the allowed set.
+  out of the allowed set. Weak spots (fewer than 3 independent channels, a critical assumption held at
+  low confidence, an unresolved item that could flip the leader) block GO on an irreversible decision and
+  are shown as warnings on a reversible one.
+- **Evidence weights:** one high-reliability item weighs as much as three low ones (H 3 · M 2 · L 1).
 - **After action:** every brief carries its review date; accepted lessons form a versioned pack that the
   next decision loads. Lessons add checks and warnings; they never move a threshold.
 
