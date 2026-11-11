@@ -23,6 +23,11 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import CallToolResult, TextContent, Tool
 
+from datetime import date
+
+from pydantic import ValidationError
+
+import vis_case
 from vis_schemas import AdvisoryResponse, AskAllResult, ModelConfig
 
 # =============================================================================
@@ -181,7 +186,138 @@ async def list_tools() -> List[Tool]:
             description="List the configured models (id, name, provider, slug).",
             inputSchema={"type": "object", "properties": {}},
         ),
+        *VIS_TOOLS,
     ]
+
+
+# =============================================================================
+# VIS pipeline tools (v1 step 2: Quick VIS). Models draft; code validates, gates and hashes.
+# =============================================================================
+_WHO = {
+    "by": {"type": "string", "description": "Who hands this in: a person's name, or the client's id when it drafts as staff."},
+    "role": {"type": "string", "enum": ["human", "staff", "red_team"],
+             "description": "'human' only for what a person typed; a model's draft is never 'human'."},
+    "family": {"type": "string", "description": "Model family of the submitter ('human' for a person)."},
+}
+
+VIS_TOOLS = [
+    Tool(
+        name="vis-start",
+        description="Open a VIS case (one decision). The charter: case_id, mode ('quick' or 'standard'), intent "
+                    "{why, what, by_when, constraints, statement ≤ 2 sentences}, question {decision_maker, action, "
+                    "by_when, constraints, outcome}, roles {decision_owner, recommender}, deadline (YYYY-MM-DD), "
+                    "reversibility ('reversible' | 'irreversible' | 'severe', set by the decision owner), "
+                    "reversibility_set_by (= decision_owner), statements [{text, label fact|assumption|interpretation, "
+                    "source_ref}], tags. Loads the lessons pack.",
+        inputSchema={"type": "object", "properties": {
+            "charter": {"type": "object"},
+            "staff_model": {"type": "string", "description": "Model id that is the staff's voice (default from config)."},
+            **_WHO,
+        }, "required": ["charter", "by", "role", "family"]},
+    ),
+    Tool(
+        name="vis-step",
+        description="Fill one stage of a case. Either hand in `payload` (with by/role/family), or set `draft_with` "
+                    "to model ids and VIS asks those models, validates their JSON and stores it marked with who "
+                    "answered. Stages: hypotheses, hypotheses_add, assumptions, estimate, red_team, evidence, "
+                    "human_hand (the decision owner only), prose (the brief's text). Returns the stage's checks.",
+        inputSchema={"type": "object", "properties": {
+            "case_id": {"type": "string"},
+            "stage": {"type": "string", "enum": list(vis_case.STAGES)},
+            "payload": {"description": "The stage object (or list) when handed in."},
+            "draft_with": {"type": "array", "items": {"type": "string"},
+                           "description": "Model ids to draft with. For red_team, default = config red_team."},
+            "draft_role": {"type": "string", "enum": ["staff", "red_team"], "default": "staff"},
+            **_WHO,
+        }, "required": ["case_id", "stage"]},
+    ),
+    Tool(
+        name="vis-gate",
+        description="Run the gate (pure code): checks every stage, the 70–100 confidence range and the reversibility "
+                    "bar; returns the allowed GO / LEARN / STOP, the recommendation, failures and warnings.",
+        inputSchema={"type": "object", "properties": {"case_id": {"type": "string"}}, "required": ["case_id"]},
+    ),
+    Tool(
+        name="vis-decide",
+        description="Record the decision owner's call (GO / LEARN / STOP). Only the decision owner decides; a "
+                    "choice other than the recommendation is recorded as an override.",
+        inputSchema={"type": "object", "properties": {
+            "case_id": {"type": "string"},
+            "choice": {"type": "string", "enum": ["GO", "LEARN", "STOP"]},
+            "by": {"type": "string"}, "reason": {"type": "string"},
+        }, "required": ["case_id", "choice", "by", "reason"]},
+    ),
+    Tool(
+        name="vis-brief",
+        description="Assemble the Decision Brief (numbers from code, prose from the 'prose' stage) and issue the "
+                    "DecisionReceipt. Needs the after-action review date.",
+        inputSchema={"type": "object", "properties": {
+            "case_id": {"type": "string"},
+            "aar_date": {"type": "string", "description": "YYYY-MM-DD"},
+        }, "required": ["case_id", "aar_date"]},
+    ),
+    Tool(
+        name="vis-show",
+        description="Show a case (state, gate, who answered, what is next), or list the cases.",
+        inputSchema={"type": "object", "properties": {"case_id": {"type": "string"}}},
+    ),
+]
+
+STORE = vis_case.CaseStore()
+
+
+def _model(model_id: str) -> ModelConfig:
+    for m in MODELS:
+        if m.id == model_id:
+            return m
+    raise ValueError(f"unknown model {model_id!r}; see list-models")
+
+
+def _errors(exc: Exception) -> str:
+    if isinstance(exc, ValidationError):
+        return "Refused — the object does not validate:\n" + "\n".join(
+            f"- {'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in exc.errors()[:12])
+    if isinstance(exc, KeyError):
+        return f"Refused — missing argument {exc}"
+    return f"Refused — {exc}"
+
+
+async def vis_call(name: str, args: Dict[str, Any]) -> str:
+    if name == "vis-start":
+        staff_id = args.get("staff_model") or DEFAULTS.get("staff_model")
+        if not staff_id:
+            raise ValueError("no staff model: pass staff_model or set defaults.staff_model in config.yaml")
+        record = vis_case.start_case(STORE, args["charter"], vis_case.model_family(_model(staff_id)),
+                                     by=args["by"], role=args["role"], family=args["family"])
+        return vis_case.summary(record)
+    if name == "vis-step":
+        case_id, stage = args["case_id"], args["stage"]
+        if args.get("draft_with") or (stage == "red_team" and "payload" not in args):
+            role = args.get("draft_role") or ("red_team" if stage == "red_team" else "staff")
+            ids = args.get("draft_with") or (DEFAULTS.get("red_team") if role == "red_team" else
+                                             [DEFAULTS.get("staff_model")])
+            models = [_model(i) for i in ids if i]
+            lines = await vis_case.draft_stage(STORE, case_id, stage, models, role, client.ask)
+            return "\n".join(lines) + "\n\n" + vis_case.summary(STORE.load(case_id))
+        if "payload" not in args:
+            raise ValueError("hand in a payload, or set draft_with")
+        record, feedback = vis_case.submit_stage(STORE, case_id, stage, args["payload"], by=args["by"],
+                                                 role=args["role"], family=args["family"])
+        return ("Checks: " + "; ".join(feedback) + "\n\n" if feedback else "") + vis_case.summary(record)
+    if name == "vis-gate":
+        return vis_case.summary(vis_case.gate_case(STORE, args["case_id"]))
+    if name == "vis-decide":
+        record = vis_case.decide_case(STORE, args["case_id"], args["choice"], by=args["by"], reason=args["reason"])
+        return vis_case.summary(record)
+    if name == "vis-brief":
+        _, page, path = vis_case.brief_case(STORE, args["case_id"], date.fromisoformat(args["aar_date"]))
+        return page + f"\n_Saved in the private case folder as {path.name}._"
+    if name == "vis-show":
+        if args.get("case_id"):
+            return vis_case.summary(STORE.load(args["case_id"]))
+        cases = STORE.list()
+        return "\n".join(f"- {c}" for c in cases) or "(no cases yet)"
+    raise ValueError(f"unknown tool {name}")
 
 
 def _render(result: AskAllResult) -> str:
@@ -207,8 +343,15 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
         )
         return CallToolResult(content=[TextContent(type="text", text=_render(result))])
     if name == "list-models":
-        text = "\n".join(f"- `{m.id}` — {m.name} ({m.provider}: {m.model_id})" for m in MODELS)
+        text = "\n".join(f"- `{m.id}` — {m.name} ({m.provider}: {m.model_id}, family {vis_case.model_family(m)})"
+                         for m in MODELS)
         return CallToolResult(content=[TextContent(type="text", text=text or "(no models)")])
+    if name.startswith("vis-"):
+        try:
+            text = await vis_call(name, arguments)
+        except (ValueError, ValidationError, KeyError) as exc:
+            text = _errors(exc)
+        return CallToolResult(content=[TextContent(type="text", text=text)])
     return CallToolResult(content=[TextContent(type="text", text=f"Unknown tool: {name}")])
 
 

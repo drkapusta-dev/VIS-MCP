@@ -5,28 +5,59 @@ api_keys:
   anthropic: ${ANTHROPIC_API_KEY}   # optional; only needed if a model uses provider: anthropic
 
 # Model slugs are EXTERNAL catalog facts — confirm each against the live OpenRouter / xAI catalog.
+# Last checked against the live OpenRouter catalog (GET /api/v1/models, no key) on 2026-11-11:
+# o1, deepseek-r1 and nemotron :free were gone and are replaced or removed below.
 models:
   - id: opus
-    name: Claude Opus
+    name: Claude Opus 4.8
     provider: openrouter
-    model_id: anthropic/claude-opus-4      # CONFIRM
+    model_id: anthropic/claude-opus-4.8          # in the catalog 2026-11-11
     temperature: 0.3
-  - id: o1
-    name: OpenAI o1
+  - id: gpt
+    name: GPT-6.1 Sol
     provider: openrouter
-    model_id: openai/o1                     # CONFIRM
-    temperature: 1.0
-  - id: r1
-    name: DeepSeek R1
+    model_id: openai/gpt-6.1-sol                  # in the catalog 2026-11-11 (replaces openai/o1, gone)
+    temperature: null
+  - id: deepseek
+    name: DeepSeek V4 Pro
     provider: openrouter
-    model_id: deepseek/deepseek-r1          # CONFIRM
-    temperature: 0.6
+    model_id: deepseek/deepseek-v4-pro            # in the catalog 2026-11-11 (replaces deepseek-r1, gone)
+    temperature: null
   - id: grok
-    name: Grok
+    name: Grok 4.3
     provider: xai
-    model_id: grok-3                         # CONFIRM
+    model_id: grok-4.3                            # x-ai/grok-4.3 is in the OpenRouter catalog; the direct xAI slug is unchecked without a key
     temperature: 0.4
+  - id: kimi
+    name: Kimi K2.6
+    provider: openrouter
+    model_id: moonshotai/kimi-k2.6                # in the catalog 2026-11-11
+    temperature: 0.3
+  - id: qwen
+    name: Qwen3.7 Max
+    provider: openrouter
+    model_id: qwen/qwen3.7-max                    # in the catalog 2026-11-11
+    temperature: 0.3
+  - id: nemotron
+    name: NVIDIA Nemotron 3 Super 120B
+    provider: openrouter
+    model_id: nvidia/nemotron-3-super-120b-a12b   # in the catalog 2026-11-11 (the :free variant is gone)
+    temperature: 0.3
+  - id: llama
+    name: Llama 4 Maverick
+    provider: openrouter
+    model_id: meta-llama/llama-4-maverick         # in the catalog 2026-11-11
+    temperature: 0.3
+  - id: mistral
+    name: Mistral Large 2512
+    provider: openrouter
+    model_id: mistralai/mistral-large-2512        # in the catalog 2026-11-11
+    temperature: 0.3
 
 defaults:
   timeout: 120
   max_tokens: 4096
+  # VIS: the staff's voice until the TRU.AI provider lands (step 3) — same model family as TRU.AI.
+  staff_model: qwen
+  # VIS: red team when none is named — three families, none of them the staff's.
+  red_team: [opus, gpt, grok]
