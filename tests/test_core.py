@@ -452,3 +452,26 @@ def test_after_action_and_the_lessons_pack():
     stray = lesson.model_copy(update={"source_receipt_hash": "0" * 64})
     bad = aar.model_copy(update={"lessons": [stray]})
     assert any("cites another battle" in f for f in core.check_after_action(bad, receipt, c.assumptions))
+
+
+# ----------------------------------------------------------------------------- more is better: floors, no ceilings
+
+
+def test_no_ceiling_on_evidence_channels_assumptions_or_scenarios():
+    extra_ev = evidence() + [
+        Evidence(id=f"E{i}", statement=f"item {i}", source_ref=f"src:{i}", cutoff=date(2026, 11, 5),
+                 reliability="M", channel=f"channel {i}", independence_group=f"g{i}")
+        for i in range(6, 31)
+    ]
+    cells = {e.id: dict(TRUE.get(e.id, {"H1": "N", "H2": "N", "H3": "N", "H4": "N"})) for e in extra_ev}
+    many_asm = assumptions() + [
+        Assumption(id=f"A{i}", text=f"assumption {i}", importance="L", confidence="M", owner="R")
+        for i in range(4, 14)
+    ]
+    rt = red_team()
+    rt[0] = rt[0].model_copy(update={"failure_scenarios": rt[0].failure_scenarios * 2})   # four scenarios
+    RedTeamReport.model_validate(rt[0].model_dump())
+    diag, gate = core.run_gate(case(ev=extra_ev, staff_cells=cells, red_cells=(cells, cells),
+                                    asm=many_asm, rt=rt))
+    assert gate.failures == [] and gate.recommendation == "GO"
+    assert len(extra_ev) == 30 and len(many_asm) == 13

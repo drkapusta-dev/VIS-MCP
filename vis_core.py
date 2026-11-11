@@ -61,9 +61,10 @@ BAR: Dict[str, int] = {"reversible": FLOOR, "irreversible": 80, "severe": 80}
 HUMAN_HAND_REQUIRED = frozenset({"irreversible", "severe"})
 assert all(bar >= FLOOR for bar in BAR.values())
 
-# --- From the method's text (§4, §7, paper §8.3). ---
+# --- From the method's text (§4, §7, paper §8.3). Evidence, channels, assumptions and red-team
+#     scenarios have floors, never ceilings: the more that is gathered, the better. ---
 HYPOTHESES_MIN, HYPOTHESES_MAX = 3, 6
-ASSUMPTIONS_MIN, ASSUMPTIONS_MAX = 3, 7          # Standard VIS; Quick needs only the biggest one
+ASSUMPTIONS_MIN = 3        # §7 "at least 3–7": a floor, no ceiling; Quick needs only the biggest one
 CRITICAL_MIN, CRITICAL_MAX = 1, 2
 MIN_INDEPENDENT_CHANNELS = 3
 RED_TEAM_MIN_FAMILIES = 2
@@ -280,7 +281,7 @@ def score_ach(
     most_diagnostic = [
         eid for eid, value in sorted(diag_values.items(), key=lambda kv: (-kv[1], _id_key(kv[0])))
         if value > 0
-    ][:3]
+    ]
     flip, flip_reason = _flip_item(cells, evidence, ordered, leader)
     scores = [
         HypothesisScore(
@@ -353,8 +354,8 @@ def check_evidence(
 def check_assumptions(assumptions: Sequence[Assumption], mode: Mode) -> List[str]:
     failures: List[str] = []
     low = ASSUMPTIONS_MIN if mode == "standard" else 1
-    if not low <= len(assumptions) <= ASSUMPTIONS_MAX:
-        failures.append(f"assumptions: {len(assumptions)}; {low}–{ASSUMPTIONS_MAX} needed (§7)")
+    if len(assumptions) < low:
+        failures.append(f"assumptions: {len(assumptions)}; at least {low} needed (§7)")
     ids = [a.id for a in assumptions]
     if len(set(ids)) != len(ids):
         failures.append("assumptions: ids are not unique")
