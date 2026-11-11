@@ -25,8 +25,8 @@ models:
     temperature: null
   - id: grok
     name: Grok 4.3
-    provider: xai
-    model_id: grok-4.3                            # x-ai/grok-4.3 is in the OpenRouter catalog; the direct xAI slug is unchecked without a key
+    provider: openrouter
+    model_id: x-ai/grok-4.3                       # in the catalog 2026-11-11; the direct xAI API answered 403 that day
     temperature: 0.4
   - id: kimi
     name: Kimi K2.6
@@ -57,6 +57,8 @@ models:
 defaults:
   timeout: 120
   max_tokens: 4096
+  # VIS drafts (structured JSON, some models reason first) get this many tokens.
+  draft_max_tokens: 16000
   # VIS: the staff's voice until the TRU.AI provider lands (step 3) — same model family as TRU.AI.
   staff_model: qwen
   # VIS: red team when none is named — three families, none of them the staff's.

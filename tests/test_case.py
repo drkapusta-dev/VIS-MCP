@@ -202,3 +202,48 @@ def test_server_lists_the_vis_tools():
     names = {t.name for t in run(server.list_tools())}
     assert {"ask-all", "list-models", "vis-start", "vis-step", "vis-gate", "vis-decide", "vis-brief",
             "vis-show"} <= names
+
+
+# ----------------------------------------------------------------------------- drafting robustness (live run, 11 Nov)
+
+
+class _Status(Exception):
+    def __init__(self, code):
+        super().__init__(f"HTTP {code}")
+        self.response = type("R", (), {"status_code": code})()
+
+
+def _scripted(answers):
+    calls = []
+
+    async def ask(model, system, user):
+        calls.append(user)
+        item = answers[len(calls) - 1]
+        if isinstance(item, Exception):
+            raise item
+        return item
+    return ask, calls
+
+
+def test_a_cut_or_empty_answer_is_retried_once_with_the_error(store, monkeypatch):
+    monkeypatch.setattr(vis_case, "RETRY_PAUSE_S", 0)
+    start(store)
+    cut = json.dumps(HYPOTHESES)[:300]                                   # cut mid-JSON, as at the token limit
+    ask, calls = _scripted([cut, json.dumps(HYPOTHESES)])
+    out = run(vis_case.draft_stage(store, "quick-001", "hypotheses", [STAFF], "staff", ask, now=T0))
+    assert out == ["qwen: stored"] and len(calls) == 2
+    assert "Your previous answer did not validate" in calls[1]
+    ask, calls = _scripted([None, ""])
+    out = run(vis_case.draft_stage(store, "quick-001", "hypotheses", [STAFF], "staff", ask, now=T0))
+    assert len(calls) == 2 and "empty answer" in out[0]
+    assert len(store.load("quick-001").case.hypotheses) == 3            # the earlier good draft stays
+
+
+def test_rate_limits_are_retried_once_and_refusals_are_not(store, monkeypatch):
+    monkeypatch.setattr(vis_case, "RETRY_PAUSE_S", 0)
+    start(store)
+    ask, calls = _scripted([_Status(429), json.dumps(HYPOTHESES)])
+    assert run(vis_case.draft_stage(store, "quick-001", "hypotheses", [STAFF], "staff", ask, now=T0)) == ["qwen: stored"]
+    ask, calls = _scripted([_Status(403), json.dumps(HYPOTHESES)])
+    out = run(vis_case.draft_stage(store, "quick-001", "hypotheses", [STAFF], "staff", ask, now=T0))
+    assert len(calls) == 1 and "403" in out[0]
